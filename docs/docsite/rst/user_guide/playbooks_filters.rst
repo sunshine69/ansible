@@ -76,7 +76,7 @@ Defining different values for true/false/null
 
 You can create a test, then define one value to use when the test returns true and another when the test returns false (new in version 1.9)::
 
-    {{ (name == "John") | ternary('Mr','Ms') }}
+    {{ (status == "needs_restart") | ternary('restart', 'continue') }}
 
 In addition, you can define a one value to use on true, one value on false and a third value on null (new in version 2.8)::
 
@@ -177,6 +177,12 @@ You can cast values as certain types. For example, if you expect the input "True
    - debug:
      msg: test
      when: some_string_value | bool
+
+If you want to perform a mathematical comparison on a fact and you want Ansible to recognize it as an integer instead of a string::
+
+   - shell: echo "only on Red Hat 6, derivatives, and later"
+     when: ansible_facts['os_family'] == "RedHat" and ansible_facts['lsb']['major_release'] | int >= 6
+
 
 .. versionadded:: 1.6
 
@@ -345,12 +351,13 @@ You can use the transformed data with ``loop`` to iterate over the same subeleme
 
 .. _combine_filter:
 
-Combining hashes
-----------------
+Combining hashes/dictionaries
+-----------------------------
 
 .. versionadded:: 2.0
 
-The `combine` filter allows hashes to be merged. For example, the following would override keys in one hash::
+The ``combine`` filter allows hashes to be merged.
+For example, the following would override keys in one hash::
 
     {{ {'a':1, 'b':2} | combine({'b':3}) }}
 
@@ -358,25 +365,208 @@ The resulting hash would be::
 
     {'a':1, 'b':3}
 
-The filter also accepts an optional `recursive=True` parameter to not
-only override keys in the first hash, but also recurse into nested
-hashes and merge their keys too:
-
-.. code-block:: jinja
-
-    {{ {'a':{'foo':1, 'bar':2}, 'b':2} | combine({'a':{'bar':3, 'baz':4}}, recursive=True) }}
-
-This would result in::
-
-    {'a':{'foo':1, 'bar':3, 'baz':4}, 'b':2}
-
 The filter can also take multiple arguments to merge::
 
     {{ a | combine(b, c, d) }}
+    {{ [a, b, c, d] | combine }}
 
-In this case, keys in `d` would override those in `c`, which would override those in `b`, and so on.
+In this case, keys in ``d`` would override those in ``c``, which would
+override those in ``b``, and so on.
 
-This behavior does not depend on the value of the `hash_behavior` setting in `ansible.cfg`.
+The filter also accepts two optional parameters: ``recursive`` and ``list_merge``.
+
+recursive
+  Is a boolean, default to ``False``.
+  Should the ``combine`` recursively merge nested hashes.
+  Note: It does **not** depend on the value of the ``hash_behaviour`` setting in ``ansible.cfg``.
+
+list_merge
+  Is a string, its possible values are ``replace`` (default), ``keep``, ``append``, ``prepend``, ``append_rp`` or ``prepend_rp``.
+  It modifies the behaviour of ``combine`` when the hashes to merge contain arrays/lists.
+
+.. code-block:: yaml
+
+    default:
+      a:
+        x: default
+        y: default
+      b: default
+      c: default
+    patch:
+      a:
+        y: patch
+        z: patch
+      b: patch
+
+If ``recursive=False`` (the default), nested hash aren't merged::
+
+    {{ default | combine(patch) }}
+
+This would result in::
+
+    a:
+      y: patch
+      z: patch
+    b: patch
+    c: default
+
+If ``recursive=True``, recurse into nested hash and merge their keys::
+
+    {{ default | combine(patch, recursive=True) }}
+
+This would result in::
+
+    a:
+      x: default
+      y: patch
+      z: patch
+    b: patch
+    c: default
+
+If ``list_merge='replace'`` (the default), arrays from the right hash will "replace" the ones in the left hash::
+
+    default:
+      a:
+        - default
+    patch:
+      a:
+        - patch
+
+.. code-block:: jinja
+
+    {{ default | combine(patch) }}
+
+This would result in::
+
+    a:
+      - patch
+
+If ``list_merge='keep'``, arrays from the left hash will be kept::
+
+    {{ default | combine(patch, list_merge='keep') }}
+
+This would result in::
+
+    a:
+      - default
+
+If ``list_merge='append'``, arrays from the right hash will be appended to the ones in the left hash::
+
+    {{ default | combine(patch, list_merge='append') }}
+
+This would result in::
+
+    a:
+      - default
+      - patch
+
+If ``list_merge='prepend'``, arrays from the right hash will be prepended to the ones in the left hash::
+
+    {{ default | combine(patch, list_merge='prepend') }}
+
+This would result in::
+
+    a:
+      - patch
+      - default
+
+If ``list_merge='append_rp'``, arrays from the right hash will be appended to the ones in the left hash.
+Elements of arrays in the left hash that are also in the corresponding array of the right hash will be removed ("rp" stands for "remove present").
+Duplicate elements that aren't in both hashes are kept::
+
+    default:
+      a:
+        - 1
+        - 1
+        - 2
+        - 3
+    patch:
+      a:
+        - 3
+        - 4
+        - 5
+        - 5
+
+.. code-block:: jinja
+
+    {{ default | combine(patch, list_merge='append_rp') }}
+
+This would result in::
+
+    a:
+      - 1
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 5
+
+If ``list_merge='prepend_rp'``, the behavior is similar to the one for ``append_rp``, but elements of arrays in the right hash are prepended::
+
+    {{ default | combine(patch, list_merge='prepend_rp') }}
+
+This would result in::
+
+    a:
+      - 3
+      - 4
+      - 5
+      - 5
+      - 1
+      - 1
+      - 2
+
+``recursive`` and ``list_merge`` can be used together::
+
+    default:
+      a:
+        a':
+          x: default_value
+          y: default_value
+          list:
+            - default_value
+      b:
+        - 1
+        - 1
+        - 2
+        - 3
+    patch:
+      a:
+        a':
+          y: patch_value
+          z: patch_value
+          list:
+            - patch_value
+      b:
+        - 3
+        - 4
+        - 4
+        - key: value
+
+.. code-block:: jinja
+
+    {{ default | combine(patch, recursive=True, list_merge='append_rp') }}
+
+This would result in::
+
+    a:
+      a':
+        x: default_value
+        y: patch_value
+        z: patch_value
+        list:
+          - default_value
+          - patch_value
+    b:
+      - 1
+      - 1
+      - 2
+      - 3
+      - 4
+      - 4
+      - key: value
+
 
 .. _extract_filter:
 
@@ -463,6 +653,11 @@ Selecting JSON data: JSON queries
 
 Sometimes you end up with a complex data structure in JSON format and you need to extract only a small set of data within it. The **json_query** filter lets you query a complex JSON structure and iterate over it using a loop structure.
 
+.. note::
+
+	This filter has migrated to the `community.general <https://galaxy.ansible.com/community/general>`_ collection. Follow the installation instructions to install that collection.
+
+
 .. note:: This filter is built upon **jmespath**, and you can use the same syntax. For examples, see `jmespath examples <http://jmespath.org/examples.html>`_.
 
 Consider this data structure::
@@ -519,21 +714,21 @@ To extract all clusters from this structure, you can use the following query::
     - name: "Display all cluster names"
       debug:
         var: item
-      loop: "{{ domain_definition | json_query('domain.cluster[*].name') }}"
+      loop: "{{ domain_definition | community.general.json_query('domain.cluster[*].name') }}"
 
 Same thing for all server names::
 
     - name: "Display all server names"
       debug:
         var: item
-      loop: "{{ domain_definition | json_query('domain.server[*].name') }}"
+      loop: "{{ domain_definition | community.general.json_query('domain.server[*].name') }}"
 
 This example shows ports from cluster1::
 
     - name: "Display all ports from cluster1"
       debug:
         var: item
-      loop: "{{ domain_definition | json_query(server_name_cluster1_query) }}"
+      loop: "{{ domain_definition | community.general.json_query(server_name_cluster1_query) }}"
       vars:
         server_name_cluster1_query: "domain.server[?cluster=='cluster1'].port"
 
@@ -543,7 +738,7 @@ Or, alternatively print out the ports in a comma separated string::
 
     - name: "Display all ports from cluster1 as a string"
       debug:
-        msg: "{{ domain_definition | json_query('domain.server[?cluster==`cluster1`].port') | join(', ') }}"
+        msg: "{{ domain_definition | community.general.json_query('domain.server[?cluster==`cluster1`].port') | join(', ') }}"
 
 .. note:: Here, quoting literals using backticks avoids escaping quotes and maintains readability.
 
@@ -552,7 +747,7 @@ Or, using YAML `single quote escaping <https://yaml.org/spec/current.html#id2534
     - name: "Display all ports from cluster1"
       debug:
         var: item
-      loop: "{{ domain_definition | json_query('domain.server[?cluster==''cluster1''].port') }}"
+      loop: "{{ domain_definition | community.general.json_query('domain.server[?cluster==''cluster1''].port') }}"
 
 .. note:: Escaping single quotes within single quotes in YAML is done by doubling the single quote.
 
@@ -561,7 +756,7 @@ In this example, we get a hash map with all ports and names of a cluster::
     - name: "Display all server ports and names from cluster1"
       debug:
         var: item
-      loop: "{{ domain_definition | json_query(server_name_cluster1_query) }}"
+      loop: "{{ domain_definition | community.general.json_query(server_name_cluster1_query) }}"
       vars:
         server_name_cluster1_query: "domain.server[?cluster=='cluster2'].{name: name, port: port}"
 
@@ -570,6 +765,7 @@ Randomizing data
 ================
 
 When you need a randomly generated value, use one of these filters.
+
 
 .. _random_mac_filter:
 
@@ -580,9 +776,13 @@ Random MAC addresses
 
 This filter can be used to generate a random MAC address from a string prefix.
 
+.. note::
+
+	This filter has migrated to the `community.general <https://galaxy.ansible.com/community/general>`_ collection. Follow the installation instructions to install that collection.
+
 To get a random MAC address from a string prefix starting with '52:54:00'::
 
-    "{{ '52:54:00' | random_mac }}"
+    "{{ '52:54:00' | community.general.random_mac }}"
     # => '52:54:00:ef:1c:03'
 
 Note that if anything is wrong with the prefix string, the filter will issue an error.
@@ -591,7 +791,7 @@ Note that if anything is wrong with the prefix string, the filter will issue an 
 
 As of Ansible version 2.9, you can also initialize the random number generator from a seed. This way, you can create random-but-idempotent MAC addresses::
 
-    "{{ '52:54:00' | random_mac(seed=inventory_hostname) }}"
+    "{{ '52:54:00' | community.general.random_mac(seed=inventory_hostname) }}"
 
 
 .. _random_filter:
@@ -739,6 +939,10 @@ Network filters
 
 These filters help you with common network tasks.
 
+.. note::
+
+	These filters have migrated to the `ansible.netcommon <https://galaxy.ansible.com/ansible/netcommon>`_ collection. Follow the installation instructions to install that collection.
+
 .. _ipaddr_filter:
 
 IP address filters
@@ -748,17 +952,17 @@ IP address filters
 
 To test if a string is a valid IP address::
 
-  {{ myvar | ipaddr }}
+  {{ myvar | ansible.netcommon.ipaddr }}
 
 You can also require a specific IP protocol version::
 
-  {{ myvar | ipv4 }}
-  {{ myvar | ipv6 }}
+  {{ myvar | ansible.netcommon.ipv4 }}
+  {{ myvar | ansible.netcommon.ipv6 }}
 
 IP address filter can also be used to extract specific information from an IP
 address. For example, to get the IP address itself from a CIDR, you can use::
 
-  {{ '192.0.2.1/24' | ipaddr('address') }}
+  {{ '192.0.2.1/24' | ansible.netcommon.ipaddr('address') }}
 
 More information about ``ipaddr`` filter and complete usage guide can be found
 in :ref:`playbooks_filters_ipaddr`.
@@ -773,7 +977,7 @@ Network CLI filters
 To convert the output of a network device CLI command into structured JSON
 output, use the ``parse_cli`` filter::
 
-    {{ output | parse_cli('path/to/spec') }}
+    {{ output | ansible.netcommon.parse_cli('path/to/spec') }}
 
 The ``parse_cli`` filter will load the spec file and pass the command output
 through it, returning JSON output. The YAML spec file defines how to parse the CLI output.
@@ -857,7 +1061,7 @@ The network filters also support parsing the output of a CLI command using the
 TextFSM library.  To parse the CLI output with TextFSM use the following
 filter::
 
-  {{ output.stdout[0] | parse_cli_textfsm('path/to/fsm') }}
+  {{ output.stdout[0] | ansible.netcommon.parse_cli_textfsm('path/to/fsm') }}
 
 Use of the TextFSM filter requires the TextFSM library to be installed.
 
@@ -869,7 +1073,7 @@ Network XML filters
 To convert the XML output of a network device command into structured JSON
 output, use the ``parse_xml`` filter::
 
-  {{ output | parse_xml('path/to/spec') }}
+  {{ output | ansible.netcommon.parse_xml('path/to/spec') }}
 
 The ``parse_xml`` filter will load the spec file and pass the command output
 through formatted as JSON.
@@ -959,7 +1163,8 @@ is an XPath expression used to get the attributes of the ``vlan`` tag in output 
       </configuration>
     </rpc-reply>
 
-.. note:: For more information on supported XPath expressions, see `<https://docs.python.org/2/library/xml.etree.elementtree.html#xpath-support>`_.
+.. note::
+  For more information on supported XPath expressions, see `XPath Support <https://docs.python.org/2/library/xml.etree.elementtree.html#xpath-support>`_.
 
 Network VLAN filters
 --------------------
@@ -976,7 +1181,7 @@ sorted string list of integers according to IOS-like VLAN list rules. This list 
 
 To sort a VLAN list::
 
-    {{ [3003, 3004, 3005, 100, 1688, 3002, 3999] | vlan_parser }}
+    {{ [3003, 3004, 3005, 100, 1688, 3002, 3999] | ansible.netcommon.vlan_parser }}
 
 This example renders the following sorted list::
 
@@ -985,7 +1190,7 @@ This example renders the following sorted list::
 
 Another example Jinja template::
 
-    {% set parsed_vlans = vlans | vlan_parser %}
+    {% set parsed_vlans = vlans | ansible.netcommon.vlan_parser %}
     switchport trunk allowed vlan {{ parsed_vlans[0] }}
     {% for i in range (1, parsed_vlans | count) %}
     switchport trunk allowed vlan add {{ parsed_vlans[i] }}
@@ -1212,6 +1417,9 @@ To replace text in a string with regex, use the "regex_replace" filter::
     # convert "localhost:80" to "localhost"
     {{ 'localhost:80' | regex_replace(':80') }}
 
+    # change a multiline string
+    {{ var | regex_replace('^', '#CommentThis#', multiline=True) }}
+
 .. note:: If you want to match the whole string and you are using ``*`` make sure to always wraparound your regular expression with the start/end anchors.
    For example ``^(.*)$`` will always match only one result, while ``(.*)`` on some Python versions will match the whole string and an empty string at the
    end, which means it will make two replacements::
@@ -1328,12 +1536,15 @@ To concatenate a list into a string::
 To work with Base64 encoded strings::
 
     {{ encoded | b64decode }}
-    {{ decoded | b64encode }}
+    {{ decoded | string | b64encode }}
 
 As of version 2.6, you can define the type of encoding to use, the default is ``utf-8``::
 
     {{ encoded | b64decode(encoding='utf-16-le') }}
-    {{ decoded | b64encode(encoding='utf-16-le') }}
+    {{ decoded | string | b64encode(encoding='utf-16-le') }}
+
+.. note:: The ``string`` filter is only required for Python 2 and ensures that text to encode is a unicode string.
+    Without that filter before b64encode the wrong value will be encoded.
 
 .. versionadded:: 2.6
 
@@ -1394,10 +1605,14 @@ To format a date using a string (like with the shell date command), use the "str
 Kubernetes filters
 ==================
 
+.. note::
+
+	These filters have migrated to the `community.kubernetes <https://galaxy.ansible.com/community/kubernetes>`_ collection. Follow the installation instructions to install that collection.
+
 Use the "k8s_config_resource_name" filter to obtain the name of a Kubernetes ConfigMap or Secret,
 including its hash::
 
-    {{ configmap_resource_definition | k8s_config_resource_name }}
+    {{ configmap_resource_definition | community.kubernetes.k8s_config_resource_name }}
 
 This can then be used to reference hashes in Pod specifications::
 
@@ -1413,7 +1628,7 @@ This can then be used to reference hashes in Pod specifications::
             containers:
             - envFrom:
                 - secretRef:
-                    name: {{ my_secret | k8s_config_resource_name }}
+                    name: {{ my_secret | community.kubernetes.k8s_config_resource_name }}
 
 .. versionadded:: 2.8
 

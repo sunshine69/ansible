@@ -27,9 +27,6 @@ DOCUMENTATION = """
             - name: ansible_winrm_host
         type: str
       remote_user:
-        keywords:
-          - name: user
-          - name: remote_user
         description:
             - The user to log in as to the Windows machine
         vars:
@@ -51,8 +48,6 @@ DOCUMENTATION = """
           - name: ansible_port
           - name: ansible_winrm_port
         default: 5986
-        keywords:
-          - name: port
         type: integer
       scheme:
         description:
@@ -71,7 +66,7 @@ DOCUMENTATION = """
         type: str
       transport:
         description:
-           - List of winrm transports to attempt to to use (ssl, plaintext, kerberos, etc)
+           - List of winrm transports to attempt to use (ssl, plaintext, kerberos, etc)
            - If None (the default) the plugin will try to automatically guess the correct list
            - The choices available depend on your version of pywinrm
         type: list
